@@ -1,0 +1,661 @@
+# Fix the noise function and rebuild the kit (overwrite files if they exist).
+import os, shutil, math, io, random
+from datetime import datetime
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
+
+BASE = "/mnt/data/superstar_website_kit"
+WEB = os.path.join(BASE, "web")
+STYLES = os.path.join(WEB, "styles")
+SCRIPTS = os.path.join(WEB, "scripts")
+IMAGES = os.path.join(WEB, "images")
+LOGOS = os.path.join(WEB, "logos")
+DOCS = os.path.join(BASE, "docs")
+ASSETS = os.path.join(BASE, "assets")
+
+for d in [BASE, WEB, STYLES, SCRIPTS, IMAGES, LOGOS, DOCS, ASSETS]:
+    os.makedirs(d, exist_ok=True)
+
+palette = {
+    "black": (10, 10, 10),
+    "red": (225, 6, 0),
+    "gray": (156, 163, 175),
+    "silver": (192, 192, 192),
+    "white": (255, 255, 255),
+}
+
+def try_font(size=48):
+    try:
+        return ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", size)
+    except Exception:
+        return ImageFont.load_default()
+
+def text_center(draw, xy, text, font, fill):
+    w, h = draw.textsize(text, font=font)
+    draw.text((xy[0]-w//2, xy[1]-h//2), text, font=font, fill=fill)
+
+def draw_star(draw, cx, cy, r_outer, r_inner, fill=None, outline=None, width=2):
+    pts = []
+    for i in range(10):
+        angle = -math.pi/2 + i*math.pi/5
+        r = r_outer if i % 2 == 0 else r_inner
+        x = cx + r * math.cos(angle)
+        y = cy + r * math.sin(angle)
+        pts.append((x, y))
+    draw.polygon(pts, fill=fill, outline=outline)
+    if outline and width > 0:
+        for w in range(1, width):
+            draw.polygon([(x+(w*0.2), y+(w*0.2)) for (x,y) in pts], outline=outline)
+
+def gradient_bg(w, h, top, bottom):
+    img = Image.new("RGB", (w, h), top)
+    top_r, top_g, top_b = top
+    bot_r, bot_g, bot_b = bottom
+    d = ImageDraw.Draw(img)
+    for y in range(h):
+        ratio = y / (h-1)
+        r = int(top_r*(1-ratio) + bot_r*ratio)
+        g = int(top_g*(1-ratio) + bot_g*ratio)
+        b = int(top_b*(1-ratio) + bot_b*ratio)
+        d.line([(0, y), (w, y)], fill=(r, g, b))
+    return img
+
+def add_noise(img, amount=12):
+    w, h = img.size
+    noise = Image.effect_noise((w, h), amount).convert("L")
+    noise = noise.point(lambda p: int(p * 0.4))
+    noise_rgb = Image.merge("RGB", (noise, noise, noise))
+    return Image.blend(img, noise_rgb, 0.15)
+
+def save(img, path):
+    img.save(path, quality=95)
+
+def make_hero(path, title, subtitle):
+    w, h = 1920, 1080
+    bg = gradient_bg(w, h, palette["black"], (30, 0, 0))
+    bg = add_noise(bg, 8)
+    d = ImageDraw.Draw(bg)
+    cx, cy = w//2, h//2
+    r = min(w, h)//3
+    d.ellipse((cx-r, cy-r, cx+r, cy+r), outline=palette["silver"], width=6)
+    draw_star(d, cx, cy, int(r*0.9), int(r*0.36), outline=palette["red"], width=6)
+    title_font = try_font(120)
+    sub_font = try_font(40)
+    text_center(d, (cx, cy + r + 120), title, title_font, palette["white"])
+    text_center(d, (cx, cy + r + 200), subtitle, sub_font, palette["gray"])
+    vignette = Image.new("L", (w, h), 0)
+    vg_draw = ImageDraw.Draw(vignette)
+    vg_draw.ellipse((-200, -200, w+200, h+200), fill=255)
+    vignette = vignette.filter(ImageFilter.GaussianBlur(180))
+    mask = vignette.point(lambda p: 255 - p)
+    bg = Image.composite(bg, Image.new("RGB", (w, h), palette["black"]), mask)
+    save(bg, path)
+
+make_hero(os.path.join(IMAGES, "hero_main.png"),
+          "SUPERSTAR® APPAREL",
+          "Brutalist · Y2K · Racing · Retro · Modern Sci‑Fi")
+
+make_hero(os.path.join(IMAGES, "hero_alt.png"),
+          "NEW DROP — FALL/WINTER",
+          "Bold graphics · Skeletons · Flames · Rhinestones")
+
+def make_product(path, name, accent="red"):
+    size = 1200
+    img = gradient_bg(size, size, palette["black"], (25,25,25))
+    img = add_noise(img, 10)
+    d = ImageDraw.Draw(img)
+    pad = 70
+    d.rectangle((pad, pad, size-pad, size-pad), outline=palette["gray"], width=4)
+    cx, cy = size//2, size//2 - 100
+    draw_star(d, cx, cy, 220, 95, outline=palette[accent], width=8)
+    d.ellipse((cx-260, cy-260, cx+260, cy+260), outline=palette["silver"], width=3)
+    f1 = try_font(64)
+    f2 = try_font(36)
+    text_center(d, (size//2, size//2 + 180), name, f1, palette["white"])
+    text_center(d, (size//2, size//2 + 240), "SUPERSTAR®", f2, palette["gray"])
+    save(img, path)
+
+product_names = [
+    "Skeleton Flames Tee",
+    "Racing Stripe Hoodie",
+    "Retro Rhinestone Cap",
+    "Y2K Mesh Jersey",
+    "Brutalist Work Jacket",
+    "SS Monogram Beanie"
+]
+for i, n in enumerate(product_names, 1):
+    make_product(os.path.join(IMAGES, f"product_{i}.png"), n, accent="red" if i%2 else "silver")
+
+def make_social(path):
+    w, h = 1200, 630
+    bg = gradient_bg(w, h, (0,0,0), (30,0,0))
+    bg = add_noise(bg, 10)
+    d = ImageDraw.Draw(bg)
+    draw_star(d, 280, h//2, 180, 75, outline=palette["red"], width=6)
+    d.ellipse((80, 100, 480, h-100), outline=palette["silver"], width=4)
+    f_big = try_font(90)
+    f_small = try_font(34)
+    d.text((540, 220), "SUPERSTAR® APPAREL", font=f_big, fill=palette["white"])
+    d.text((540, 320), "Versatile · Diverse · Bold", font=f_small, fill=palette["gray"])
+    d.text((540, 370), "Brutalist • Y2K • Racing • Retro • Modern Sci‑Fi", font=f_small, fill=palette["silver"])
+    save(bg, path)
+
+make_social(os.path.join(IMAGES, "og_social.png"))
+
+def make_favicon_png(path, size=256):
+    img = Image.new("RGBA", (size, size), (0,0,0,0))
+    d = ImageDraw.Draw(img)
+    d.ellipse((16,16,size-16,size-16), outline=palette["white"], width=10)
+    draw_star(d, size//2, size//2, int(size*0.34), int(size*0.14), outline=palette["red"], width=10)
+    img.save(path)
+
+make_favicon_png(os.path.join(WEB, "favicon.png"), 256)
+
+def star_svg(size=256, stroke="#E10600", circle="#C0C0C0", stroke_width=8):
+    r = size/2
+    cx = cy = r
+    pts = []
+    for i in range(10):
+        angle = -math.pi/2 + i*math.pi/5
+        rr = r*0.82 if i%2==0 else r*0.34
+        x = cx + rr*math.cos(angle)
+        y = cy + rr*math.sin(angle)
+        pts.append(f"{x:.2f},{y:.2f}")
+    poly = " ".join(pts)
+    return f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {size} {size}" width="{size}" height="{size}">
+  <circle cx="{cx}" cy="{cy}" r="{r*0.9:.2f}" fill="none" stroke="{circle}" stroke-width="{stroke_width}"/>
+  <polygon points="{poly}" fill="none" stroke="{stroke}" stroke-width="{stroke_width}" stroke-linejoin="round"/>
+</svg>'''
+
+def wordmark_svg(text="SUPERSTAR", size_w=1200, size_h=220):
+    return f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {size_w} {size_h}" width="{size_w}" height="{size_h}">
+  <defs>
+    <style>
+      .word {{ font: 900 160px system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Noto Sans", sans-serif; letter-spacing: 6px; }}
+    </style>
+  </defs>
+  <text x="50%" y="62%" text-anchor="middle" class="word" fill="#FFFFFF">{text}</text>
+</svg>'''
+
+def monogram_svg(text="SS", size=512):
+    return f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {size} {size}" width="{size}" height="{size}">
+  <defs>
+    <style>
+      .mono {{ font: 900 {int(size*0.55)}px Impact, "Arial Black", system-ui, sans-serif; }}
+    </style>
+  </defs>
+  <rect x="0" y="0" width="{size}" height="{size}" fill="#0a0a0a"/>
+  <text x="50%" y="58%" text-anchor="middle" class="mono" fill="#E10600">{text}</text>
+</svg>'''
+
+with open(os.path.join(LOGOS, "superstar-star-in-circle.svg"), "w") as f:
+    f.write(star_svg())
+
+with open(os.path.join(LOGOS, "superstar-wordmark.svg"), "w") as f:
+    f.write(wordmark_svg("SUPERSTAR®"))
+
+with open(os.path.join(LOGOS, "superstar-monogram-ss.svg"), "w") as f:
+    f.write(monogram_svg("SS"))
+
+main_css = """
+:root{
+  --color-bg:#0a0a0a;
+  --color-panel:#111214;
+  --color-red:#e10600;
+  --color-gray:#9ca3af;
+  --color-silver:#c0c0c0;
+  --color-white:#ffffff;
+  --radius:14px;
+  --shadow:0 10px 30px rgba(0,0,0,.35);
+  --font-sans:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Noto Sans",sans-serif;
+  --font-display:Impact,"Arial Black",system-ui,sans-serif;
+}
+
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:var(--color-bg);color:var(--color-white);font-family:var(--font-sans);}
+a{color:inherit;text-decoration:none}
+img{max-width:100%;display:block}
+
+.container{max-width:1200px;margin:0 auto;padding:0 20px}
+
+.header{position:sticky;top:0;z-index:50;background:rgba(10,10,10,.7);backdrop-filter:saturate(180%) blur(10px);border-bottom:1px solid #1e1e1e}
+.header-inner{display:flex;align-items:center;justify-content:space-between;padding:16px 0}
+.brand{display:flex;align-items:center;gap:14px}
+.brand .logotype{font-family:var(--font-display);font-size:22px;letter-spacing:2px}
+.brand .badge{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;border:2px solid var(--color-silver)}
+.brand .badge::before{content:"★";color:var(--color-red);font-weight:900;}
+
+.nav{display:flex;align-items:center;gap:24px}
+.nav a{opacity:.85}
+.nav a:hover{opacity:1}
+.nav-toggle{display:none}
+
+@media (max-width: 900px){
+  .nav{display:none}
+  .nav.mobile{display:flex;flex-direction:column;gap:14px;padding:16px;background:#0f0f0f;border:1px solid #1d1d1d;border-radius:12px;margin-top:8px}
+  .nav-toggle{display:inline-flex;align-items:center;gap:8px;padding:10px 14px;border:1px solid #1f1f1f;border-radius:10px;background:#121212}
+}
+
+.hero{position:relative;overflow:hidden;border-radius:18px;border:1px solid #242424;box-shadow:var(--shadow);margin:24px 0}
+.hero img{width:100%;height:auto}
+.hero .overlay{position:absolute;inset:0;display:grid;align-items:flex-end;padding:4vw;background:linear-gradient(transparent,rgba(0,0,0,.6))}
+.hero h1{font-family:var(--font-display);font-size:clamp(28px,4vw,54px);margin:0}
+.hero p{color:var(--color-silver);max-width:780px}
+
+.cta{display:inline-block;margin-top:12px;padding:12px 20px;border-radius:12px;border:1px solid var(--color-red);}
+.cta:hover{background:rgba(225,6,0,.08)}
+
+.section{margin:56px 0}
+.section h2{font-family:var(--font-display);letter-spacing:1px;margin:0 0 8px}
+.section p.lead{color:var(--color-gray);margin:0 0 20px}
+
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:24px}
+@media (max-width: 900px){.grid{grid-template-columns:1fr 1fr}}
+@media (max-width: 560px){.grid{grid-template-columns:1fr}}
+
+.card{background:linear-gradient(180deg,#121212,#0e0e0e);border:1px solid #1e1e1e;border-radius:16px;overflow:hidden;box-shadow:var(--shadow)}
+.card .body{padding:14px}
+.card .title{font-weight:700;letter-spacing:.6px;margin:6px 0}
+.card .price{color:var(--color-silver)}
+.card .tag{display:inline-block;font-size:12px;border:1px solid #2a2a2a;border-radius:20px;padding:4px 10px;margin-right:8px;color:var(--color-gray)}
+
+.footer{margin:56px 0 40px;border-top:1px solid #1c1c1c;padding-top:16px;color:#9b9b9b;font-size:14px}
+
+.form input,.form textarea,.form select{width:100%;padding:12px 14px;margin:8px 0;border-radius:12px;background:#121212;border:1px solid #1f1f1f;color:var(--color-white)}
+.form button{padding:12px 16px;border-radius:12px;border:1px solid #2d2d2d;background:#141414;color:var(--color-white)}
+.form button:hover{border-color:var(--color-red);box-shadow:0 0 0 3px rgba(225,6,0,.12)}
+
+.breadcrumbs{font-size:14px;color:var(--color-gray);margin:8px 0}
+.gallery{display:grid;grid-template-columns:1fr .8fr;gap:20px}
+@media (max-width: 860px){.gallery{grid-template-columns:1fr}}
+.thumb-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.badge-red{color:var(--color-red)}
+"""
+with open(os.path.join(STYLES, "main.css"), "w") as f:
+    f.write(main_css)
+
+main_js = """
+const $ = (s)=>document.querySelector(s);
+const $$ = (s)=>document.querySelectorAll(s);
+
+const toggleBtn = document.getElementById('nav-toggle');
+const mobileWrap = document.getElementById('mobile-nav-wrap');
+if(toggleBtn){
+  toggleBtn.addEventListener('click', ()=>{
+    mobileWrap.hidden = !mobileWrap.hidden;
+  });
+}
+
+const filterBtns = $$('.filter-btn');
+if(filterBtns.length){
+  filterBtns.forEach(btn=>btn.addEventListener('click',(e)=>{
+    const cat = e.target.dataset.cat;
+    $$('.product-card').forEach(card=>{
+      card.style.display = (cat==='all' || card.dataset.cat===cat) ? '' : 'none';
+    });
+    filterBtns.forEach(b=>b.classList.remove('active'));
+    e.target.classList.add('active');
+  }));
+}
+
+const addToCart = document.getElementById('add-to-cart');
+if(addToCart){
+  addToCart.addEventListener('click', ()=>{
+    alert('This is a static starter kit. Hook this up to Shopify / Stripe / your platform of choice.');
+  });
+}
+"""
+with open(os.path.join(SCRIPTS, "main.js"), "w") as f:
+    f.write(main_js)
+
+def head(title, desc="Superstar Apparel — Versatile, diverse, bold.", og="images/og_social.png"):
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{title}</title>
+  <meta name="description" content="{desc}">
+  <link rel="icon" type="image/png" href="favicon.png">
+  <meta property="og:title" content="{title}">
+  <meta property="og:description" content="{desc}">
+  <meta property="og:image" content="{og}">
+  <meta property="og:type" content="website">
+  <meta name="theme-color" content="#0a0a0a">
+  <link rel="stylesheet" href="styles/main.css">
+</head>
+<body>
+<header class="header">
+  <div class="container header-inner">
+    <a href="index.html" class="brand" aria-label="Superstar Apparel">
+      <span class="badge" aria-hidden="true"></span>
+      <span class="logotype">SUPERSTAR®</span>
+    </a>
+    <nav class="nav" aria-label="Primary">
+      <a href="collections.html">Shop</a>
+      <a href="about.html">About</a>
+      <a href="contact.html">Contact</a>
+    </nav>
+    <button class="nav-toggle" id="nav-toggle" aria-expanded="false" aria-controls="mobile-nav-wrap">Menu</button>
+  </div>
+  <div class="container" id="mobile-nav-wrap" hidden>
+    <nav class="nav mobile" aria-label="Mobile">
+      <a href="collections.html">Shop</a>
+      <a href="about.html">About</a>
+      <a href="contact.html">Contact</a>
+    </nav>
+  </div>
+</header>
+<main class="container">
+"""
+
+def foot():
+    year = datetime.now().year
+    return f"""
+</main>
+<footer class="container footer">
+  <div>© {year} SUPERSTAR® Apparel. All rights reserved.</div>
+  <div style="margin-top:6px">Brutalist · Y2K · Racing · Retro · Modern Sci‑Fi</div>
+</footer>
+<script src="scripts/main.js"></script>
+</body>
+</html>
+"""
+
+index_html = head("Superstar® Apparel — Official Site")
+index_html += f"""
+<section class="hero" aria-label="Featured">
+  <img src="images/hero_main.png" alt="Superstar apparel hero banner">
+  <div class="overlay">
+    <h1>VERSATILE · DIVERSE · BOLD</h1>
+    <p>Signature graphics in black, red, grey, silver, and white. Stars, skeletons, flames, and SS monograms — crafted for tees, hoodies, hats, and more.</p>
+    <a class="cta" href="collections.html">Shop New Drop →</a>
+  </div>
+</section>
+
+<section class="section">
+  <h2>New Arrivals</h2>
+  <p class="lead">Fresh cuts and graphics for the season.</p>
+  <div class="grid">
+"""
+prices = ["$45", "$85", "$38", "$70", "$120", "$32"]
+cats = ["tees","hoodies","hats","jerseys","outerwear","hats"]
+for i, name in enumerate(product_names, 1):
+    index_html += f'''
+    <article class="card product-card" data-cat="{cats[i-1]}">
+      <img src="images/product_{i}.png" alt="{name}">
+      <div class="body">
+        <div class="tag">{cats[i-1].capitalize()}</div>
+        <div class="title">{name}</div>
+        <div class="price">{prices[i-1]}</div>
+      </div>
+    </article>
+    '''
+index_html += """
+  </div>
+</section>
+"""
+index_html += foot()
+
+with open(os.path.join(WEB, "index.html"), "w") as f:
+    f.write(index_html)
+
+collections_html = head("Shop — Superstar® Apparel")
+collections_html += """
+<nav class="breadcrumbs">Home / <span class="badge-red">Shop</span></nav>
+<section class="section">
+  <h2>All Collections</h2>
+  <p class="lead">Filter by category.</p>
+  <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+    <button class="cta filter-btn active" data-cat="all">All</button>
+    <button class="cta filter-btn" data-cat="tees">Tees</button>
+    <button class="cta filter-btn" data-cat="hoodies">Hoodies</button>
+    <button class="cta filter-btn" data-cat="hats">Hats</button>
+    <button class="cta filter-btn" data-cat="jerseys">Jerseys</button>
+    <button class="cta filter-btn" data-cat="outerwear">Outerwear</button>
+  </div>
+  <div class="grid">
+"""
+collections_html += index_html.split('<div class="grid">',1)[1].rsplit("</div>\n</section>",1)[0]
+collections_html += """
+  </div>
+</section>
+"""
+collections_html += foot()
+with open(os.path.join(WEB, "collections.html"), "w") as f:
+    f.write(collections_html)
+
+product_html = head("Skeleton Flames Tee — Superstar® Apparel",
+                    "Skeleton Flames Tee — a bold Superstar graphic piece.",
+                    "images/product_1.png")
+product_html += """
+<nav class="breadcrumbs"><a href="index.html">Home</a> / <a href="collections.html">Shop</a> / Skeleton Flames Tee</nav>
+<section class="section">
+  <div class="gallery">
+    <div>
+      <img src="images/product_1.png" alt="Skeleton Flames Tee main image">
+      <div class="thumb-row" style="margin-top:10px">
+        <img src="images/product_2.png" alt="Alternate view">
+        <img src="images/product_3.png" alt="Alternate view">
+        <img src="images/product_4.png" alt="Alternate view">
+        <img src="images/product_5.png" alt="Alternate view">
+      </div>
+    </div>
+    <div>
+      <h2>Skeleton Flames Tee</h2>
+      <p class="lead">A brutalist, energetic graphic with flames and SS motifs. Soft hand-feel cotton.</p>
+      <div class="price" style="font-size:24px;margin:6px 0">$45</div>
+      <form class="form" onsubmit="return false">
+        <label for="size">Size</label>
+        <select id="size" required>
+          <option value="">Select size</option>
+          <option>XS</option><option>S</option><option>M</option><option>L</option><option>XL</option><option>XXL</option>
+        </select>
+        <label for="qty">Qty</label>
+        <input id="qty" type="number" value="1" min="1" max="10">
+        <button id="add-to-cart" type="button">Add to Cart</button>
+      </form>
+      <div style="margin-top:16px;font-size:14px;color:#a8a8a8">
+        <div>• 6.5oz premium cotton</div>
+        <div>• Screenprint + optional rhinestone embellishment</div>
+        <div>• Color: Black/Red/Silver</div>
+      </div>
+      <details style="margin-top:14px">
+        <summary>Shipping & Returns</summary>
+        <p>Ships in 3–5 business days. 30-day exchange policy on unworn items.</p>
+      </details>
+      <details>
+        <summary>Care</summary>
+        <p>Wash cold, inside‑out. Hang dry. Do not iron over prints.</p>
+      </details>
+      <hr style="border-color:#1f1f1f;margin:18px 0">
+      <div style="font-size:14px;color:#8d8d8d">SKU: SS-FW25-TEES-001</div>
+    </div>
+  </div>
+</section>
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org/",
+  "@type": "Product",
+  "name": "Skeleton Flames Tee",
+  "image": [
+    "images/product_1.png"
+  ],
+  "brand": {
+    "@type": "Brand",
+    "name": "Superstar Apparel"
+  },
+  "description": "Brutalist Superstar tee with skeleton and flames motif.",
+  "sku": "SS-FW25-TEES-001",
+  "offers": {
+    "@type": "Offer",
+    "url": "product.html",
+    "priceCurrency": "USD",
+    "price": "45.00",
+    "availability": "https://schema.org/InStock"
+  }
+}
+</script>
+"""
+product_html += foot()
+with open(os.path.join(WEB, "product.html"), "w") as f:
+    f.write(product_html)
+
+about_html = head("About — Superstar® Apparel")
+about_html += """
+<section class="section">
+  <h2>About Superstar®</h2>
+  <p class="lead">Superstar is versatile, diverse, and bold — drawing from brutalist, Y2K, racing, retro, and modern sci‑fi influences with global cultural threads.</p>
+  <div class="grid">
+    <div class="card">
+      <img src="images/hero_alt.png" alt="Brand mood">
+      <div class="body">
+        <div class="title">Design Language</div>
+        <p>Primary colors: black, red, grey, silver, white. Motifs: stars, skeletons, flames, rhinestones, and SS monograms. Clean, powerful logo usage.</p>
+      </div>
+    </div>
+    <div class="card">
+      <img src="images/product_4.png" alt="Craft">
+      <div class="body">
+        <div class="title">Craft & Quality</div>
+        <p>High‑quality bases, print processes, and embellishments. Built to last and stand out.</p>
+      </div>
+    </div>
+    <div class="card">
+      <img src="images/product_6.png" alt="Community">
+      <div class="body">
+        <div class="title">Community</div>
+        <p>Rooted in culture and movement — from music to motorsport. We build for the streets and the stage.</p>
+      </div>
+    </div>
+  </div>
+</section>
+"""
+about_html += foot()
+with open(os.path.join(WEB, "about.html"), "w") as f:
+    f.write(about_html)
+
+contact_html = head("Contact — Superstar® Apparel")
+contact_html += """
+<section class="section">
+  <h2>Contact</h2>
+  <p class="lead">For orders, wholesale, and collabs — reach out.</p>
+  <form class="form" action="#" method="post" onsubmit="return false">
+    <label for="name">Name</label>
+    <input id="name" placeholder="Your name">
+    <label for="email">Email</label>
+    <input id="email" type="email" placeholder="you@example.com">
+    <label for="msg">Message</label>
+    <textarea id="msg" rows="5" placeholder="Tell us what’s up…"></textarea>
+    <button type="submit">Send</button>
+  </form>
+</section>
+"""
+contact_html += foot()
+with open(os.path.join(WEB, "contact.html"), "w") as f:
+    f.write(contact_html)
+
+readme = """
+# Superstar® Website Build Kit
+
+This kit gives you a production‑ready starting point for **Superstar Apparel**: brand assets, page templates, and notes.
+
+## What's inside
+- **/web/** – Static site starter (HTML/CSS/JS) with Home, Shop, Product, About, Contact.
+- **/web/images/** – Prebuilt hero banners, product placeholders, and OG/social image.
+- **/web/logos/** – SVG logos: star‑in‑circle, wordmark, and SS monogram.
+- **/docs/** – Brand guide, content checklist, and SEO checklist.
+
+## Quick start
+1. Open `/web/index.html` in a browser to preview.
+2. Replace product placeholder images in `/web/images/` with your actual photos.
+3. Update copy in the HTML files (titles, descriptions, prices, SKUs).
+4. When ready, deploy the `/web` folder to any static host (e.g., Netlify, Vercel, GitHub Pages) or port the templates to Shopify.
+
+## Hooking up to Shopify (high level)
+- Use these pages as reference sections in a Shopify theme.
+- Map product grids to **Collections** and the product page to Shopify's product template.
+- Replace the "Add to Cart" button action with Shopify's cart/add.js endpoint or theme cart form.
+"""
+
+brand_guide = """
+# Brand Guide (Lite)
+
+**Essence:** Versatile · Diverse · Bold  
+**Influences:** Brutalist, Y2K, Racing, Retro, Modern Sci‑Fi, Japanese / Russian / German cultural threads.
+
+**Palette**  
+- Black `#0A0A0A`
+- Red `#E10600`
+- Grey `#9CA3AF`
+- Silver `#C0C0C0`
+- White `#FFFFFF`
+
+**Motifs**  
+Stars, skeletons, flames, rhinestones, and SS abbreviations. Clean, powerful logos for main branding.
+
+**Typography (suggested)**  
+- Display: *Impact / Arial Black* (swap later for a premium condensed sans or sci‑fi font)  
+- Body: *System UI* stack for performance.  
+You can replace with hosted webfonts; see CSS variable `--font-display` and `--font-sans`.
+
+**Imagery**  
+High‑contrast lighting, metallic accents, motion blur, racing cues, and subtle Y2K textures.
+
+**Logo usage**  
+- Minimum clear space = height of star.  
+- Primary mark: star inside circle.  
+- Wordmark for headers and navigation.  
+- Monogram **SS** for badges/labels.  
+"""
+
+content_checklist = """
+# Content Checklist
+
+- [ ] Homepage hero headline + tagline
+- [ ] 6–12 product photos (front, back, detail)
+- [ ] Product titles, prices, SKUs, fabric weight, care
+- [ ] Collection descriptions (Tees, Hoodies, Hats, Jerseys, Outerwear)
+- [ ] About story (100–200 words) + 3 brand pillars
+- [ ] Contact info (email/socials), returns policy
+- [ ] Size chart (add a page or section later)
+- [ ] Social OG image (already included at /web/images/og_social.png)
+"""
+
+seo_checklist = """
+# SEO Checklist
+
+- [ ] Unique <title> and meta description per page
+- [ ] Open Graph (OG) tags and social preview image
+- [ ] Product **JSON‑LD** schema (see product.html)
+- [ ] Alt text on all images
+- [ ] Page speed: compress product photos (~200–300 KB)
+- [ ] Descriptive URLs (index, collections, product, about, contact)
+- [ ] 301 redirects when renaming pages
+- [ ] Add XML sitemap & robots.txt at deploy time
+"""
+
+with open(os.path.join(BASE, "README.md"), "w") as f:
+    f.write(readme.strip())
+with open(os.path.join(DOCS, "BRAND_GUIDE.md"), "w") as f:
+    f.write(brand_guide.strip())
+with open(os.path.join(DOCS, "CONTENT_CHECKLIST.md"), "w") as f:
+    f.write(content_checklist.strip())
+with open(os.path.join(DOCS, "SEO_CHECKLIST.md"), "w") as f:
+    f.write(seo_checklist.strip())
+
+# Tree listing & zip
+def tree(path):
+    listing = []
+    for root, dirs, files in os.walk(path):
+        rel = os.path.relpath(root, path)
+        indent = "" if rel=="." else "  " * (rel.count(os.sep))
+        listing.append(f"{indent}{os.path.basename(root) if rel!='.' else os.path.basename(path)}")
+        for fn in files:
+            listing.append(f"{indent}  {fn}")
+    return "\n".join(listing)
+
+listing_text = tree(BASE)
+zip_path = shutil.make_archive("/mnt/data/superstar_website_kit", "zip", BASE)
+
+listing_text, zip_path
